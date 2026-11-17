@@ -9,6 +9,7 @@
 pub struct Enumerator {
     stack: [Frame; 16],
     depth: usize,
+    segment: u16,
     next_bus: u8,
     max_bus: u8,
 }
@@ -17,13 +18,17 @@ pub struct Frame {
     pub bus: u8,
     pub device: u8,
     pub function: u8,
+    pub last_function: u8,
     pub phase: Phase,
 }
 
 pub enum Phase {
-    Start,
+    /// Проверка функции 0 и чтение типа заголовка.
+    Probe,
+    /// Перебор функций устройства.
     Functions,
-    AfterBridge { bridge: Address, first_bus: u8 },
+    /// Запись subordinate после обхода поддерева.
+    AfterBridge { bridge: Address },
 }
 ```
 
@@ -31,45 +36,112 @@ pub enum Phase {
 
 | Фаза | Что делает |
 |------|------------|
-| `Start` | Проверяет функцию 0 |
-| `Functions` | Перебирает функции |
-| `AfterBridge` | Записывает `subordinate` и продолжает |
+| `Probe` | Читает Vendor ID и Header Type, решает, сколько функций проверять |
+| `Functions` | Перебирает функции, для мостов спускается ниже |
+| `AfterBridge` | Записывает фактический `subordinate` и возвращается к перебору |
 
 ## Шаг обхода
 
 ```rust
-pub fn step(&mut self, cfg: &impl ConfigSpace) -> Result<Option<Address>, Error> {
-    while let Some(frame) = self.stack.get_mut(self.depth) {
+pub fn step(&mut self, cfg: &impl ConfigSpace)
+    -> Result<Option<Address>, Error>
+{
+    loop {
+        let Some(frame) = self.stack.get_mut(self.depth) else {
+            return Ok(None);                    // обход закончен
+        };
+
         match frame.phase {
-            Phase::Start => {
+            Phase::Probe => {
                 let a = Address {
                     segment: self.segment,
                     bus: frame.bus,
                     device: frame.device,
                     function: 0,
                 };
+
                 if cfg.read16(a, 0x00)? == 0xFFFF {
                     self.pop();
                     continue;
                 }
+
                 let hdr = cfg.read8(a, 0x0E)?;
+                frame.last_function = if hdr & 0x80 != 0 { 7 } else { 0 };
+                frame.function = 0;
                 frame.phase = Phase::Functions;
-                self.multi = hdr & 0x80 != 0;
-                self.function = 0;
             }
+
             Phase::Functions => {
-                // обход функций
+                let fn_no = frame.function;
+                let a = Address {
+                    segment: self.segment,
+                    bus: frame.bus,
+                    device: frame.device,
+                    function: fn_no,
+                };
+
+                if cfg.read16(a, 0x00)? != 0xFFFF {
+                    if cfg.read8(a, 0x0E)? & 0x7F == 0x01 {
+                        let sec = self.alloc_bus()?;
+                        cfg.write8(a, 0x18, frame.bus)?;
+                        cfg.write8(a, 0x19, sec)?;
+                        cfg.write8(a, 0x1A, sec)?;
+
+                        frame.phase = Phase::AfterBridge { bridge: a };
+                        self.push(sec, 0)?;
+                        continue;
+                    }
+                    return Ok(Some(a));         // обычная функция
+                }
+
+                if fn_no >= frame.last_function {
+                    self.pop();
+                } else {
+                    frame.function += 1;
+                }
             }
-            Phase::AfterBridge { bridge, first_bus } => {
-                let max = self.next_bus.saturating_sub(1);
-                cfg.write8(bridge, 0x1A, max)?;
+
+            Phase::AfterBridge { bridge } => {
+                let max = self.max_bus;
+                let b = *bridge;
+                cfg.write8(b, 0x1A, max)?;
                 frame.phase = Phase::Functions;
+                frame.function += 1;
             }
         }
     }
-    Ok(None)
 }
 ```
+
+## Вспомогательные операции
+
+| Метод | Действие |
+|-------|----------|
+| `push(bus, device)` | Кладёт новый кадр в фазе `Probe` |
+| `pop()` | Убирает верхний кадр |
+| `alloc_bus()` | Выдаёт следующий номер, обновляет `max_bus` |
+
+```rust
+fn push(&mut self, bus: u8, device: u8) {
+    if self.depth + 1 < self.stack.len() {
+        self.depth += 1;
+        self.stack[self.depth] = Frame {
+            bus,
+            device,
+            function: 0,
+            last_function: 0,
+            phase: Phase::Probe,
+        };
+    }
+}
+```
+
+## Почему `max_bus`
+
+`max_bus` хранит наибольший выданный номер. При возврате из
+поддерева он записывается в `Subordinate Bus Number` моста.
+Если бы там осталось значение, выданное при спуске, мост
+не пропускал бы транзакции к шинам, назначенным позже.
 
 ## Размер стека
 

@@ -102,14 +102,19 @@ pub fn for_each_cap(
 
 ## MSI (`0x05`)
 
-| Смещение | Поле |
-|----------|------|
-| `+0x00` | ID / Next / Message Control |
-| `+0x04` | Message Address (младшие 32) |
-| `+0x08` | Message Address (старшие 32, если 64 бита) |
-| `+0x0C` | Message Data |
-| `+0x10` | Mask Bits (если поддерживается) |
-| `+0x14` | Pending Bits |
+Состав зависит от разрядности адреса (бит 7 в `Message Control`):
+
+| Смещение | 32-битный адрес | 64-битный адрес |
+|----------|-----------------|-----------------|
+| `+0x00` | ID / Next / Message Control | то же |
+| `+0x04` | Message Address | Message Address, младшие 32 |
+| `+0x08` | Message Data | Message Address, старшие 32 |
+| `+0x0C` | Mask Bits (если есть) | Message Data |
+| `+0x10` | Pending Bits | Mask Bits (если есть) |
+| `+0x14` | — | Pending Bits |
+
+Поле `Message Data` задаёт вектор; адрес указывает в пространство
+контроллера прерываний.
 
 ## MSI-X (`0x11`)
 

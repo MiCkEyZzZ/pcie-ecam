@@ -52,15 +52,16 @@ static void __iomem *pci_ecam_map_bus(struct pci_bus *bus,
                                       int where)
 {
     struct pci_config_window *cfg = bus->sysdata;
-    unsigned int dev = PCI_SLOT(devfn);
-    unsigned int fn  = PCI_FUNC(devfn);
+    unsigned int busn = bus->number;
+    void __iomem *base;
 
-    if (!pci_is_root_bus(bus)) {
-        /* для подчинённых шин смещение считается иначе */
-    }
+    if (!cfg || busn < cfg->busn_start || busn > cfg->busn_end)
+        return NULL;
 
-    return cfg->win + ((bus->number - cfg->busn_start) << cfg->ops->bus_shift)
-                    + (dev << 15) + (fn << 12) + (where & ~3);
+    base = cfg->win + ((busn - cfg->busn_start) << cfg->ops->bus_shift);
+    base += (PCI_SLOT(devfn) << 15) + (PCI_FUNC(devfn) << 12);
+
+    return base + (where & ~3);
 }
 ```
 

@@ -30,9 +30,9 @@
 | `0x0002` | Virtual Channel | Виртуальные каналы |
 | `0x0003` | Device Serial Number | Серийный номер |
 | `0x0004` | Power Budgeting | Бюджет питания |
-| `0x0005` | Root Complex Link | Связи корневого комплекса |
-| `0x0006` | Root Complex Internal Link | Внутренние связи |
-| `0x0007` | Access Control Services | Управление доступом |
+| `0x0005` | Root Complex Link Declaration | Объявление связей корневого комплекса |
+| `0x0006` | Root Complex Internal Link Control | Управление внутренними связями |
+| `0x0007` | Root Complex Event Collector Association | Связь с коллектором событий |
 | `0x000B` | Vendor-Specific | Специфичное для производителя |
 | `0x000D` | ACS | Изоляция транзакций |
 | `0x000E` | ARI | Альтернативная нумерация |
